@@ -15,6 +15,8 @@ while [ 1 ]; do
           awk  '{ORS=","; if ($1 > 9) print  "{cpu: " $1 ", proc: " $2 "}" }' | \
           sed 's/.$//' )
 
+    docker=$(  docker ps |          awk  '{ORS=","; if ($1 > 1) print  "{ IMAGE: " $2 ", NAMES: " $11 "} \n"  }')
+
     if [ $sepflag = 1 ]; then
        echo ","
     fi
@@ -24,7 +26,9 @@ while [ 1 ]; do
     echo '    "date":      "'$(date)'"',
     echo '    "j8_count":  "'$j8count'"',
     echo '    "ps":        "['$ps']"',
-    echo '    "mpstat":    '$mpstat
+    echo '    "mpstat":    '$mpstat,
+    echo '    "docker":    '$docker
+
     echo }
     echo
 done
