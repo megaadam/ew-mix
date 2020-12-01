@@ -7,11 +7,11 @@ import os
 Cue = namedtuple('Cue', 'start end text note')
 
 all_cues = [
-    Cue(1.8,  4.2,  '#1:  Span 1',                        '1.8,  4.2'),
-    Cue(5.9,  8.1,  '#2:  Span 2 -- make this fail',      '5.9,  8.1'),
-    Cue(10, 12.001, '#3:  Trailing leftofers',            '10.1, 12.001 microsec edge-to-edge'),
+    Cue(1.8,  4.2,  'No. 1:  Span 1',                        '1.8,  4.2'),
+    Cue(5.9,  8.1,  'No. :  Span 2 -- make this fail',      '5.9,  8.1'),
+    Cue(10, 12.001, 'No. :  Trailing leftofers',            '10.1, 12.001 microsec edge-to-edge'),
     Cue(12.001, 14.001,   '#4 9.9 .................... ', '12.001, 14.001 microsec overlap'),
-    Cue(14, 17,     '#4:',                                '14, 17'),
+    Cue(14, 17,     'No. ',                                '14, 17'),
 ]
 
 
@@ -20,14 +20,18 @@ class Segment:
         self.seg = []
         self.seg_offs = seg_offs
     
-    def render_header(self, seg_start):
+    def render_header(self):
         self.seg.append('WEBVTT')
-        self.seg.append(f'#EXT-X-TIMESTAMP-MAP=MPEGTS: {self.seg_offs * 90000}')
+        self.seg.append(f'X-TIMESTAMP-MAP=MPEGTS:{self.seg_offs * 90000},LOCAL:00:00:00.000')
         self.seg.append('')
 
-    def render_cue(self, cue):
+    def render_cue(self, cue):            
         start = max(cue.start - self.seg_offs, 0)
         end = cue.end - self.seg_offs
+        if abs(start-end) < 0.002:
+            return
+            # Narrow condition, but it works in this case
+
         self.seg.append(f'')
         self.seg.append(f'{self.timestamp(start)} --> '
                         f'{self.timestamp(end)}')
@@ -40,11 +44,11 @@ class Segment:
         # works up to 59 sec
         sec = str(int(time)).zfill(2)
         frame= str(int(math.modf(time)[0] * 1000)).zfill(3)
-        ts = f'00:00:{sec}:{frame}'
+        ts = f'00:00:{sec}.{frame}'
         return ts
 
     def flush(self, seg_no, outdir):
-        with open(os.path.join(outdir, f'{seg_no}.webvtt'), 'w') as f:
+        with open(os.path.join(outdir, f'{str(seg_no).zfill(2)}.webvtt'), 'w') as f:
             for line in self.seg:
                 f.writelines(line + '\n')
 
@@ -60,6 +64,7 @@ class SegmentGenerator:
 
         with open(os.path.join(self.outdir, 'index.m3u8'), 'w') as f:
             f.writelines([
+                '#EXTM3U', '\n',
                 '#EXT-X-VERSION:3', '\n',
                 '#EXT-X-MEDIA-SEQUENCE:1', '\n',
                 '#EXT-X-TARGETDURATION:2', '\n',
@@ -69,18 +74,43 @@ class SegmentGenerator:
             for i in range(1, math.ceil(self.track_duration / self.seg_len) + 1):
                 f.writelines([
                     '#EXTINF:2.000,', '\n',
-                    f'{i}.webvtt', '\n', '\n',
+                    f'{str(i).zfill(2)}.webvtt', '\n',
                 ])
+            
+            f.writelines(['#EXT-X-ENDLIST\n'])
 
 
     def render_primitive_playlist(self):
+        # Each segment has MPEGTS = seg_start
+        # Cue start never before seg start
+        # Cue end can be after segment end
         seg_no = 1
         seg_start = 0
         seg_end = seg_start + self.seg_len
         while seg_start < self.track_duration:
             segment_cues = self.cues_for_segment(seg_start, seg_end)
             s = Segment(seg_start)
-            s.render_header(seg_start)
+            s.render_header()
+            for cue_to_render in segment_cues:
+                s.render_cue(cue_to_render)
+
+            s.flush(seg_no, self.outdir)
+
+            seg_start = seg_end
+            seg_end += self.seg_len
+            seg_no += 1
+            
+    def render_rfc_compliant_playlist(self):
+        # Each segment has MPEGTS = 0
+        # Cue start may be before segment start
+        # Cue end can be after segment end
+        seg_no = 1
+        seg_start = 0
+        seg_end = seg_start + self.seg_len
+        while seg_start < self.track_duration:
+            segment_cues = self.cues_for_segment(seg_start, seg_end)
+            s = Segment(0)
+            s.render_header()
             for cue_to_render in segment_cues:
                 s.render_cue(cue_to_render)
 
@@ -123,6 +153,10 @@ def main():
     seg_gen = SegmentGenerator(seg_len=2, outdir='./primitive')
     seg_gen.render_media_playlist()
     seg_gen.render_primitive_playlist()
+
+    seg_gen = SegmentGenerator(seg_len=2, outdir='./rfc-compliant')
+    seg_gen.render_media_playlist()
+    seg_gen.render_rfc_compliant_playlist()
 
 
 main()
